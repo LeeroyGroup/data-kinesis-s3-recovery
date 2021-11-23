@@ -7,35 +7,51 @@ def main(event, context):
     s3 = boto3.client('s3')
     sqs = boto3.client('sqs')
 
+    paginator = s3.get_paginator('list_objects_v2')
+
     if 'prefix' in event:
-        listing = s3.list_objects_v2(Bucket=event['bucket'], Prefix=event['prefix'])
+        pages = paginator.paginate(Bucket=event['bucket'], Prefix=event['prefix'])
+#        listing = s3.list_objects_v2(Bucket=event['bucket'], Prefix=event['prefix'])
     else:
-        listing = s3.list_objects_v2(Bucket=event['bucket'])
+        pages = paginator.paginate(Bucket=event['bucket'])
+#        listing = s3.list_objects_v2(Bucket=event['bucket'])
 
-    if listing['IsTruncated']:
-        print("WARNING: S3 bucket listing was truncated")
-
+    totallySent = 0
     messages = []
-    bucket = listing['Name']
-    for obj in listing['Contents']:
-        if not obj['Key'].endswith('/'):
-            message = {
-                'Id': str(len(messages) + 1),
-                'MessageBody': json.dumps({
-                    'bucket': bucket,
-                    'item': obj['Key'],
-                    'kinesis_stream': event['kinesis_stream']
-                }),
-                'MessageGroupId': event['bucket']
-            }
-            messages.append(message)
-            if len(messages) == 10:
-                sqs.send_message_batch(
-                    QueueUrl=event['queue_url'],
-                    Entries=messages)
-                messages = []
+    for page in pages:
+        if page['IsTruncated']:
+            print("WARNING: S3 bucket listing was truncated")
 
+        bucket = page['Name']
+        for obj in page['Contents']:
+            groupId = str(len(messages) + 1)
+            if not obj['Key'].endswith('/'):
+                message = {
+                    'Id': groupId,
+                    'MessageBody': json.dumps({
+                        'bucket': bucket,
+                        'item': obj['Key'],
+                        'kinesis_stream': event['kinesis_stream'],
+                        'queue_url': event['queue_url']
+                    }),
+                    'MessageGroupId': bucket + "-" + groupId
+                }
+#                print(f"Message prepared {message}")
+                messages.append(message)
+                if len(messages) == 10:
+#                    print(f"sending {len(messages)}!")
+                    response = sqs.send_message_batch(
+                        QueueUrl=event['queue_url'],
+                        Entries=messages)
+                    print(f"Response from sending {len(messages)} msgs: {response}")
+                    totallySent += 10
+                    messages = []
+
+#    print(f"sending {len(messages)}!")
+    totallySent += len(messages)
     if len(messages) > 0:
-        sqs.send_message_batch(
+        response = sqs.send_message_batch(
             QueueUrl=event['queue_url'],
             Entries=messages)
+        print(f"Response from sending  {len(messages)} msgs: {response}")
+    print(f"Totally sent {totallySent} messages!")

@@ -26,6 +26,11 @@ Files are recovered in two steps, with two lambda functions:
   2. `recover_firehose_s3_backup.py` is triggered by the SQS queue. It parses objects from each file and 
   puts records to the Kinesis Firehose stream
 
+### Modifications
+  These functions has got some modifications to increase the performance.
+  1. `queue_firehose_s3_backups.py` use a paginator so we are able to read more than the limited amount (1000) of files from S3.
+  2. `recover_firehose_s3_backup.py` send to firehose in batches of 100 records at the time
+
 ## Test
 
 With the lambda functions deployed, they can be tested with an event like the following
